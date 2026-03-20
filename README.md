@@ -60,7 +60,8 @@ Install dependencies
 pip install -r requirements.txt
 
 Download Ollama: https://ollama.com/
-Downalod pytesseract: https://pypi.org/project/pytesseract/
+
+Downaload pytesseract: https://pypi.org/project/pytesseract/
 
 Set up environment variables
 
