@@ -1,3 +1,5 @@
+Link= https://alihasnain388-rag-app-tc1hur.streamlit.app/
+
 # 📚 RAG Chatbot
 
 A **Retrieval-Augmented Generation (RAG) Chatbot** built with Streamlit that answers questions based on uploaded PDF and DOCX files. It uses **hybrid search (BM25 + vector embeddings + Cross-Encoder reranking)** and an LLM to generate accurate, context-aware responses.
@@ -67,4 +69,5 @@ GROQ_API_KEY=your_groq_api_key
 4. Run the App
 streamlit run app.py
 
-Link= https://alihasnain388-rag-app-tc1hur.streamlit.app/
+
+
