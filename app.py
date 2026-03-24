@@ -38,8 +38,8 @@ index = pc.Index(INDEX_NAME)
 # Multi-file upload
 # -------------------------------
 uploaded_files = st.file_uploader(
-    "Upload Files (PDF, DOCX, or Image)",
-    type=["pdf", "docx", "jpg", "jpeg", "png", "webp"],
+    "Upload Files (PDF, DOCX)",
+    type=["pdf", "docx",],
     accept_multiple_files=True
 )
 
