@@ -66,3 +66,5 @@ GROQ_API_KEY=your_groq_api_key
 
 4. Run the App
 streamlit run app.py
+
+Link= https://alihasnain388-rag-app-tc1hur.streamlit.app/
