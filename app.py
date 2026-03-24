@@ -2,7 +2,6 @@ import streamlit as st
 import os
 from PIL import Image
 import numpy as np
-import cv2
 from dotenv import load_dotenv
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
