@@ -1,118 +1,69 @@
-📚 RAG Chatbot
+# 📚 RAG Chatbot
 
-A Retrieval-Augmented Generation (RAG) Chatbot built with Streamlit that can answer questions based on uploaded PDF, DOCX, or image files. It uses OCR, hybrid search (BM25 + embeddings + Cross-Encoder reranker), and LLM for context-aware answers.
+A **Retrieval-Augmented Generation (RAG) Chatbot** built with Streamlit that answers questions based on uploaded PDF and DOCX files. It uses **hybrid search (BM25 + vector embeddings + Cross-Encoder reranking)** and an LLM to generate accurate, context-aware responses.
 
-Features
+---
 
-Upload multiple files: PDF, DOCX, JPG, PNG, WEBP
+## 🚀 Features
 
-Extract text from documents and images
+- 📂 Upload multiple files:
+  - PDF
+  - DOCX  
+  *(Image OCR currently disabled in deployed version)*
 
-Split large documents into chunks for better retrieval
+- 📄 Automatic text extraction from documents
 
-Hybrid search:
+- ✂️ Intelligent document chunking using RecursiveCharacterTextSplitter
 
-BM25 keyword search
+- 🔍 **Hybrid Search Pipeline**:
+  - BM25 keyword-based retrieval
+  - Vector similarity search using Pinecone + HuggingFace embeddings
+  - Cross-Encoder reranking for improved relevance
 
-Vector embeddings via Pinecone + HuggingFace
+- 🤖 LLM-powered answers using Groq (LLaMA 3.1)
 
-Cross-Encoder reranker for better accuracy
+- 📌 Displays answers with source references
 
-Answer questions using Ollama LLaMA2 with source references
+- 🌐 Deployed and accessible via Streamlit Cloud
 
-Display results in a user-friendly Streamlit interface
+---
 
-Requirements
+## 🛠️ Tech Stack
 
-Python 3.10+
+- Python 3.10+
+- Streamlit (UI & deployment)
+- LangChain ecosystem:
+  - langchain_community
+  - langchain_text_splitters
+  - langchain_huggingface
+  - langchain_pinecone
+  - langchain_groq
+- Pinecone (Vector Database)
+- HuggingFace Embeddings (all-MiniLM-L6-v2)
+- BM25 (rank_bm25)
+- Cross-Encoder (sentence-transformers)
+- python-docx
+- python-dotenv
 
-Streamlit
+---
 
-Pillow
+## ⚙️ Setup
 
-OpenCV (cv2)
-
-pytesseract
-
-python-docx
-
-langchain and related modules:
-
-langchain_community, langchain_text_splitters, langchain_huggingface, langchain_ollama, langchain_core, langchain_pinecone
-
-Pinecone client
-
-BM25 (rank_bm25)
-
-Sentence Transformers (CrossEncoder)
-
-python-dotenv
-
-Setup
-
-Clone the repository
-
+ 1. Clone Repository
+```bash
 git clone <repo-url>
 cd <repo-folder>
 
-Install dependencies
-
+2. Install Dependencies
 pip install -r requirements.txt
 
-Download Ollama: https://ollama.com/
+3. Environment Variables
 
-Downaload pytesseract: https://pypi.org/project/pytesseract/
+Create a .env file in the root directory:
 
-Set up environment variables
+PINECONE_API_KEY=your_api_key
+PINECONE_INDEX_NAME=your_index_name
+GROQ_API_KEY=your_groq_api_key
 
-Create a .env file in the project root:
-
-PINECONE_API_KEY=<your_pinecone_api_key>
-PINECONE_ENV=<your_pinecone_environment>
-PINECONE_INDEX_NAME=<your_index_name>
-
-Run Streamlit app
-
+4. Run the App
 streamlit run app.py
-
-How it Works
-
-Upload files
-
-PDF: Loaded via PyPDFLoader
-
-DOCX: Loaded via python-docx
-
-Images: Text extracted via Tesseract OCR
-
-Document processing
-
-Split documents into chunks using RecursiveCharacterTextSplitter
-
-Add chunks to Pinecone vector store for embeddings
-
-Hybrid search
-
-BM25 keyword-based scoring
-
-Vector embeddings retrieval (via Pinecone)
-
-Combine and deduplicate results
-
-Rerank using Cross-Encoder
-
-Answer generation
-
-Prompt Ollama LLaMA2 with top retrieved chunks
-
-Provide answer along with sources
-
-Usage
-
-Open the Streamlit app in your browser.
-
-Upload one or multiple files (PDF, DOCX, or images).
-
-Enter a question in the text input box.
-
-Get the answer and sources extracted from uploaded documents.
