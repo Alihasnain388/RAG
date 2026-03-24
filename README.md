@@ -9,7 +9,6 @@ A **Retrieval-Augmented Generation (RAG) Chatbot** built with Streamlit that ans
 - 📂 Upload multiple files:
   - PDF
   - DOCX  
-  *(Image OCR currently disabled in deployed version)*
 
 - 📄 Automatic text extraction from documents
 
