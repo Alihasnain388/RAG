@@ -121,7 +121,6 @@ packaging==24.2
 pandas==2.3.3
 pillow==12.1.1
 pinecone==7.3.0
-pinecone-client==6.0.0
 pinecone-plugin-assistant==1.8.0
 pinecone-plugin-interface==0.0.7
 preshed==3.0.12
