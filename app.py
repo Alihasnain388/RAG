@@ -182,26 +182,152 @@ def extract_excel(uploaded_file) -> list[Document]:
     docs = []
 
     for sheet in workbook.worksheets:
-        rows = []
+        header = None
 
         for row_number, row in enumerate(sheet.iter_rows(values_only=True), start=1):
             values = [str(value).strip() for value in row if value is not None and str(value).strip()]
-            if values:
-                rows.append((row_number, " | ".join(values)))
+            if not values:
+                continue
 
-        if not rows:
-            continue
+            if header is None:
+                header = values
+                continue
 
-        sheet_text = "\n".join(f"Row {row_number}: {row_text}" for row_number, row_text in rows)
-        docs.append(
-            Document(
-                page_content=sheet_text,
-                metadata={"source": uploaded_file.name, "sheet": sheet.title},
+            if header and len(header) == len(values):
+                row_text = "\n".join(
+                    f"- {column}: {value}" for column, value in zip(header, values)
+                )
+            else:
+                row_text = " | ".join(values)
+
+            docs.append(
+                Document(
+                    page_content=f"Sheet: {sheet.title}\nRow: {row_number}\n{row_text}",
+                    metadata={
+                        "source": uploaded_file.name,
+                        "sheet": sheet.title,
+                        "row": row_number,
+                        "preserve_chunk": True,
+                    },
+                )
             )
-        )
 
     workbook.close()
     return docs
+
+
+def markdown_record_title(block: str, fallback: str) -> str:
+    for line in block.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("## "):
+            return stripped.removeprefix("## ").strip()
+    return fallback
+
+
+def extract_rag_style_markdown(text: str, source_name: str) -> list[Document]:
+    docs = []
+    title = ""
+    body = text
+
+    lines = text.splitlines()
+    if lines and lines[0].startswith("# "):
+        title = lines[0].removeprefix("# ").strip()
+        body = "\n".join(lines[1:]).strip()
+
+    blocks = [block.strip() for block in body.split("\n---") if block.strip()]
+    if len(blocks) <= 1:
+        return []
+
+    for index, block in enumerate(blocks, start=1):
+        section = markdown_record_title(block, f"Record {index}")
+        content = f"{title}\n\n{block}".strip() if title else block
+        docs.append(
+            Document(
+                page_content=content,
+                metadata={
+                    "source": source_name,
+                    "section": section,
+                    "record": index,
+                    "preserve_chunk": True,
+                },
+            )
+        )
+
+    return docs
+
+
+def extract_markdown_table(text: str, source_name: str) -> list[Document]:
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    table_lines = [line for line in lines if line.startswith("|") and line.endswith("|")]
+
+    if len(table_lines) < 3:
+        return []
+
+    headers = [cell.strip() for cell in table_lines[0].strip("|").split("|")]
+    docs = []
+
+    for row_index, row in enumerate(table_lines[2:], start=1):
+        values = [cell.strip() for cell in row.strip("|").split("|")]
+        if not any(values):
+            continue
+
+        row_text = "\n".join(
+            f"- {header}: {value}" for header, value in zip(headers, values)
+        )
+        name = values[-1] if values else f"Row {row_index}"
+        docs.append(
+            Document(
+                page_content=row_text,
+                metadata={
+                    "source": source_name,
+                    "section": name,
+                    "record": row_index,
+                    "preserve_chunk": True,
+                },
+            )
+        )
+
+    return docs
+
+
+def extract_markdown_sections(text: str, source_name: str) -> list[Document]:
+    docs = []
+    current_heading = None
+    current_lines = []
+
+    for line in text.splitlines():
+        if line.startswith("## "):
+            if current_lines:
+                section = current_heading or f"Section {len(docs) + 1}"
+                docs.append(
+                    Document(
+                        page_content="\n".join(current_lines).strip(),
+                        metadata={
+                            "source": source_name,
+                            "section": section,
+                            "preserve_chunk": True,
+                        },
+                    )
+                )
+            current_heading = line.removeprefix("## ").strip()
+            current_lines = [line]
+        else:
+            current_lines.append(line)
+
+    if current_lines:
+        section = current_heading or "Markdown document"
+        docs.append(
+            Document(
+                page_content="\n".join(current_lines).strip(),
+                metadata={
+                    "source": source_name,
+                    "section": section,
+                    "preserve_chunk": True,
+                },
+            )
+        )
+
+    return [doc for doc in docs if doc.page_content.strip()]
 
 
 def extract_markdown(uploaded_file) -> list[Document]:
@@ -209,12 +335,15 @@ def extract_markdown(uploaded_file) -> list[Document]:
     if not text:
         return []
 
-    return [
-        Document(
-            page_content=text,
-            metadata={"source": uploaded_file.name},
-        )
-    ]
+    rag_style_docs = extract_rag_style_markdown(text, uploaded_file.name)
+    if rag_style_docs:
+        return rag_style_docs
+
+    table_docs = extract_markdown_table(text, uploaded_file.name)
+    if table_docs:
+        return table_docs
+
+    return extract_markdown_sections(text, uploaded_file.name)
 
 
 def extract_documents(uploaded_files) -> list[Document]:
@@ -257,8 +386,12 @@ def source_label(doc: Document) -> str:
         return f"{source} (page {doc.metadata['page']})"
     if "slide" in doc.metadata:
         return f"{source} (slide {doc.metadata['slide']})"
+    if "sheet" in doc.metadata and "row" in doc.metadata:
+        return f"{source} (sheet {doc.metadata['sheet']}, row {doc.metadata['row']})"
     if "sheet" in doc.metadata:
         return f"{source} (sheet {doc.metadata['sheet']})"
+    if "section" in doc.metadata:
+        return f"{source} ({doc.metadata['section']})"
     return source
 
 
@@ -309,8 +442,16 @@ if st.session_state.get("processed_signature") != signature:
             st.warning("No readable text found in the uploaded files.")
             st.stop()
 
+        preserved_chunks = [
+            doc for doc in documents if doc.metadata.get("preserve_chunk")
+        ]
+        splittable_documents = [
+            doc for doc in documents if not doc.metadata.get("preserve_chunk")
+        ]
+
         splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
-        chunks = splitter.split_documents(documents)
+        split_chunks = splitter.split_documents(splittable_documents)
+        chunks = preserved_chunks + split_chunks
         chunks = [chunk for chunk in chunks if chunk.page_content.strip()]
 
         if not chunks:
@@ -370,6 +511,9 @@ def hybrid_search(query: str, k: int = 5) -> list[Document]:
             doc.metadata.get("page"),
             doc.metadata.get("slide"),
             doc.metadata.get("sheet"),
+            doc.metadata.get("row"),
+            doc.metadata.get("section"),
+            doc.metadata.get("record"),
             doc.page_content,
         )
         if key not in seen:
@@ -419,3 +563,4 @@ Question:
             st.write("### Sources")
             for source in sources:
                 st.write(f"- {source}")
+
