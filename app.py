@@ -1,5 +1,6 @@
 import hashlib
 import os
+import re
 import tempfile
 import uuid
 from io import BytesIO
@@ -177,30 +178,224 @@ def extract_pptx(uploaded_file) -> list[Document]:
     return docs
 
 
+def clean_cell(value) -> str:
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
+def normalize_header(header: list[str]) -> list[str]:
+    normalized = []
+
+    for index, column in enumerate(header, start=1):
+        normalized.append(column or f"Column {index}")
+
+    return normalized
+
+
+def find_column(headers: list[str], *candidates: str) -> str | None:
+    header_lookup = {header.strip().lower(): header for header in headers}
+
+    for candidate in candidates:
+        match = header_lookup.get(candidate.strip().lower())
+        if match:
+            return match
+
+    return None
+
+
+def count_values(records: list[dict[str, str]], column: str) -> dict[str, int]:
+    counts = {}
+
+    for record in records:
+        value = record.get(column, "").strip()
+        if value:
+            counts[value] = counts.get(value, 0) + 1
+
+    return counts
+
+
+def ordered_unique(values: list[str]) -> list[str]:
+    unique = []
+    seen = set()
+
+    for value in values:
+        value = value.strip()
+        key = value.lower()
+        if value and key not in seen:
+            unique.append(value)
+            seen.add(key)
+
+    return unique
+
+
+def excel_summary_docs(
+    source_name: str,
+    sheet_name: str,
+    headers: list[str],
+    records: list[dict[str, str]],
+) -> list[Document]:
+    if not records:
+        return []
+
+    docs = []
+    client_column = find_column(headers, "Client")
+    vm_column = find_column(headers, "VM Name", "VM", "Machine", "Machine Name")
+    service_column = find_column(headers, "Service Name", "Service", "Services")
+    project_column = find_column(headers, "Project")
+    environment_column = find_column(headers, "Environment", "Env")
+
+    lines = [
+        f"Excel Summary for {source_name}",
+        f"Sheet: {sheet_name}",
+        f"Total data rows: {len(records)}",
+        f"Columns: {', '.join(headers)}",
+    ]
+
+    if vm_column:
+        unique_vms = ordered_unique([record.get(vm_column, "") for record in records])
+        lines.append(f"Total unique VMs: {len(unique_vms)}")
+        lines.append("Unique VM Names: " + ", ".join(unique_vms))
+
+    if service_column:
+        unique_services = ordered_unique(
+            [record.get(service_column, "") for record in records]
+        )
+        lines.append(f"Total unique services: {len(unique_services)}")
+        lines.append("Unique Services: " + ", ".join(unique_services))
+
+    for label, column in [
+        ("Client", client_column),
+        ("Project", project_column),
+        ("Environment", environment_column),
+    ]:
+        if not column:
+            continue
+
+        counts = count_values(records, column)
+        if counts:
+            formatted_counts = ", ".join(
+                f"{value}: {count}" for value, count in sorted(counts.items())
+            )
+            lines.append(f"{label} counts: {formatted_counts}")
+
+    docs.append(
+        Document(
+            page_content="\n".join(lines),
+            metadata={
+                "source": source_name,
+                "sheet": sheet_name,
+                "section": "Excel summary",
+                "preserve_chunk": True,
+            },
+        )
+    )
+
+    if client_column and vm_column:
+        clients = ordered_unique([record.get(client_column, "") for record in records])
+
+        for client in clients:
+            client_records = [
+                record for record in records if record.get(client_column, "").strip() == client
+            ]
+            unique_vms = ordered_unique(
+                [record.get(vm_column, "") for record in client_records]
+            )
+            unique_services = (
+                ordered_unique([record.get(service_column, "") for record in client_records])
+                if service_column
+                else []
+            )
+            project_counts = (
+                count_values(client_records, project_column) if project_column else {}
+            )
+            environment_counts = (
+                count_values(client_records, environment_column)
+                if environment_column
+                else {}
+            )
+
+            client_lines = [
+                f"Excel Client Summary for {client}",
+                f"Source: {source_name}",
+                f"Sheet: {sheet_name}",
+                f"Client: {client}",
+                f"Total rows for client: {len(client_records)}",
+                f"Total unique VMs for client: {len(unique_vms)}",
+                "Unique VM Names: " + ", ".join(unique_vms),
+            ]
+
+            if service_column:
+                client_lines.extend(
+                    [
+                        f"Total unique services for client: {len(unique_services)}",
+                        "Unique Services: " + ", ".join(unique_services),
+                    ]
+                )
+
+            if project_counts:
+                client_lines.append(
+                    "Project counts: "
+                    + ", ".join(
+                        f"{value}: {count}" for value, count in sorted(project_counts.items())
+                    )
+                )
+            if environment_counts:
+                client_lines.append(
+                    "Environment counts: "
+                    + ", ".join(
+                        f"{value}: {count}"
+                        for value, count in sorted(environment_counts.items())
+                    )
+                )
+
+            docs.append(
+                Document(
+                    page_content="\n".join(client_lines),
+                    metadata={
+                        "source": source_name,
+                        "sheet": sheet_name,
+                        "section": f"Client summary: {client}",
+                        "client": client,
+                        "preserve_chunk": True,
+                    },
+                )
+            )
+
+    return docs
+
+
 def extract_excel(uploaded_file) -> list[Document]:
     workbook = load_workbook(BytesIO(uploaded_file.getvalue()), data_only=True, read_only=True)
     docs = []
 
     for sheet in workbook.worksheets:
         header = None
+        records = []
+        row_docs = []
 
         for row_number, row in enumerate(sheet.iter_rows(values_only=True), start=1):
-            values = [str(value).strip() for value in row if value is not None and str(value).strip()]
-            if not values:
+            values = [clean_cell(value) for value in row]
+            if not any(values):
                 continue
 
             if header is None:
-                header = values
+                header = normalize_header(values)
                 continue
 
-            if header and len(header) == len(values):
-                row_text = "\n".join(
-                    f"- {column}: {value}" for column, value in zip(header, values)
-                )
-            else:
-                row_text = " | ".join(values)
+            padded_values = values + [""] * max(0, len(header) - len(values))
+            row_map = {
+                column: value
+                for column, value in zip(header, padded_values)
+                if value
+            }
+            records.append(row_map)
 
-            docs.append(
+            row_text = "\n".join(
+                f"- {column}: {value}" for column, value in row_map.items()
+            )
+
+            row_docs.append(
                 Document(
                     page_content=f"Sheet: {sheet.title}\nRow: {row_number}\n{row_text}",
                     metadata={
@@ -211,6 +406,10 @@ def extract_excel(uploaded_file) -> list[Document]:
                     },
                 )
             )
+
+        if header:
+            docs.extend(excel_summary_docs(uploaded_file.name, sheet.title, header, records))
+        docs.extend(row_docs)
 
     workbook.close()
     return docs
@@ -238,8 +437,30 @@ def extract_rag_style_markdown(text: str, source_name: str) -> list[Document]:
     if len(blocks) <= 1:
         return []
 
+    sections = [
+        markdown_record_title(block, f"Record {index}")
+        for index, block in enumerate(blocks, start=1)
+    ]
+    docs.append(
+        Document(
+            page_content="\n".join(
+                [
+                    f"Markdown Summary for {source_name}",
+                    f"Title: {title or source_name}",
+                    f"Total records: {len(blocks)}",
+                    "Records: " + ", ".join(sections),
+                ]
+            ),
+            metadata={
+                "source": source_name,
+                "section": "Markdown summary",
+                "preserve_chunk": True,
+            },
+        )
+    )
+
     for index, block in enumerate(blocks, start=1):
-        section = markdown_record_title(block, f"Record {index}")
+        section = sections[index - 1]
         content = f"{title}\n\n{block}".strip() if title else block
         docs.append(
             Document(
@@ -388,10 +609,10 @@ def source_label(doc: Document) -> str:
         return f"{source} (slide {doc.metadata['slide']})"
     if "sheet" in doc.metadata and "row" in doc.metadata:
         return f"{source} (sheet {doc.metadata['sheet']}, row {doc.metadata['row']})"
-    if "sheet" in doc.metadata:
-        return f"{source} (sheet {doc.metadata['sheet']})"
     if "section" in doc.metadata:
         return f"{source} ({doc.metadata['section']})"
+    if "sheet" in doc.metadata:
+        return f"{source} (sheet {doc.metadata['sheet']})"
     return source
 
 
@@ -530,15 +751,298 @@ def hybrid_search(query: str, k: int = 5) -> list[Document]:
     return [doc for doc, _ in reranked[:3]]
 
 
+def normalize_query_text(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", text.lower()).strip()
+
+
+def line_value(text: str, label: str) -> str | None:
+    pattern = rf"^{re.escape(label)}:\s*(.+)$"
+    match = re.search(pattern, text, flags=re.MULTILINE | re.IGNORECASE)
+    return match.group(1).strip() if match else None
+
+
+def split_csv_value(value: str | None) -> list[str]:
+    if not value:
+        return []
+    return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def parse_row_document(doc: Document) -> dict[str, str] | None:
+    if "sheet" not in doc.metadata or "row" not in doc.metadata:
+        return None
+
+    record = {
+        "Source": str(doc.metadata.get("source", "")),
+        "Sheet": str(doc.metadata.get("sheet", "")),
+        "Row": str(doc.metadata.get("row", "")),
+    }
+
+    for line in doc.page_content.splitlines():
+        stripped = line.strip()
+        if not stripped.startswith("- ") or ": " not in stripped:
+            continue
+
+        key, value = stripped[2:].split(": ", 1)
+        record[key.strip()] = value.strip()
+
+    return record if len(record) > 3 else None
+
+
+def structured_rows_from_chunks(available_chunks: list[Document]) -> list[dict[str, str]]:
+    rows = []
+
+    for doc in available_chunks:
+        row = parse_row_document(doc)
+        if row:
+            rows.append(row)
+
+    return rows
+
+
+def is_vm_table(rows: list[dict[str, str]]) -> bool:
+    if not rows:
+        return False
+
+    keys = {key.lower() for row in rows[:20] for key in row}
+    return bool({"vm name", "vm ip", "service name", "port", "client"} & keys)
+
+
+def looks_like_structured_vm_question(query: str, rows: list[dict[str, str]]) -> bool:
+    if not is_vm_table(rows):
+        return False
+
+    normalized_query = normalize_query_text(query)
+    field_terms = {
+        "client",
+        "nbp",
+        "project",
+        "environment",
+        "env",
+        "vm",
+        "vms",
+        "machine",
+        "machines",
+        "ip",
+        "service",
+        "services",
+        "port",
+        "ports",
+        "raast",
+        "mpay",
+        "digital",
+        "jazz",
+        "beoe",
+        "bulk",
+    }
+
+    if any(term in normalized_query.split() for term in field_terms):
+        return True
+
+    for row in rows[:200]:
+        for key in ["VM Name", "VM IP", "Service Name", "Project", "Environment"]:
+            value = normalize_query_text(row.get(key, ""))
+            if value and value in normalized_query:
+                return True
+
+    return False
+
+
+def compact_structured_table(rows: list[dict[str, str]], max_rows: int = 350) -> str:
+    preferred_columns = [
+        "Source",
+        "Sheet",
+        "Row",
+        "S.No",
+        "Client",
+        "Project",
+        "Environment",
+        "VM IP",
+        "VM Name",
+        "Service Name",
+        "Port",
+        "Purpose",
+    ]
+    all_columns = ordered_unique([key for row in rows for key in row.keys()])
+    columns = [column for column in preferred_columns if column in all_columns]
+    columns.extend(column for column in all_columns if column not in columns)
+
+    lines = [" | ".join(columns)]
+    lines.append(" | ".join("---" for _ in columns))
+
+    for row in rows[:max_rows]:
+        lines.append(" | ".join(row.get(column, "") for column in columns))
+
+    if len(rows) > max_rows:
+        lines.append(f"... {len(rows) - max_rows} more rows omitted ...")
+
+    return "\n".join(lines)
+
+
+def structured_table_summary(rows: list[dict[str, str]]) -> str:
+    if not rows:
+        return ""
+
+    clients = ordered_unique([row.get("Client", "") for row in rows])
+    unique_vms = ordered_unique([row.get("VM Name", "") for row in rows])
+    unique_services = ordered_unique([row.get("Service Name", "") for row in rows])
+    projects = count_values(rows, "Project") if "Project" in rows[0] else {}
+    environments = count_values(rows, "Environment") if "Environment" in rows[0] else {}
+
+    lines = [
+        f"Total rows: {len(rows)}",
+        f"Clients: {', '.join(clients)}",
+        f"Total unique VM Names: {len(unique_vms)}",
+        "Unique VM Names: " + ", ".join(unique_vms),
+    ]
+
+    if unique_services:
+        lines.extend(
+            [
+                f"Total unique Service Names: {len(unique_services)}",
+                "Unique Service Names: " + ", ".join(unique_services),
+            ]
+        )
+
+    if projects:
+        lines.append(
+            "Project counts: "
+            + ", ".join(f"{key}: {value}" for key, value in sorted(projects.items()))
+        )
+    if environments:
+        lines.append(
+            "Environment counts: "
+            + ", ".join(f"{key}: {value}" for key, value in sorted(environments.items()))
+        )
+
+    return "\n".join(lines)
+
+
+def structured_answer(query: str, available_chunks: list[Document]):
+    normalized_query = normalize_query_text(query)
+    is_count_query = any(
+        word in normalized_query
+        for word in ["kitni", "kitna", "count", "total", "how many"]
+    )
+    is_list_query = any(
+        word in normalized_query
+        for word in ["kya kya", "list", "names", "naam", "which"]
+    )
+    wants_vm = any(
+        word in normalized_query
+        for word in ["vm", "vms", "machine", "machines"]
+    )
+    wants_service = any(
+        word in normalized_query
+        for word in ["service", "services"]
+    )
+
+    if not (is_count_query or is_list_query) or not (wants_vm or wants_service):
+        return None, []
+
+    client_summaries = [
+        doc
+        for doc in available_chunks
+        if str(doc.metadata.get("section", "")).lower().startswith("client summary:")
+    ]
+
+    matching_summaries = [
+        doc
+        for doc in client_summaries
+        if normalize_query_text(str(doc.metadata.get("client", ""))) in normalized_query
+    ]
+
+    if not matching_summaries and len(client_summaries) == 1:
+        matching_summaries = client_summaries
+
+    if not matching_summaries:
+        return None, []
+
+    doc = matching_summaries[0]
+    client = doc.metadata.get("client", "selected client")
+
+    if wants_vm:
+        count = line_value(doc.page_content, "Total unique VMs for client")
+        names = split_csv_value(line_value(doc.page_content, "Unique VM Names"))
+        if count:
+            answer = f"{client} main total unique VMs/machines {count} hain."
+            if is_list_query and names:
+                answer += "\n\nVM names:\n" + "\n".join(f"- {name}" for name in names)
+            return answer, [doc]
+
+    if wants_service:
+        count = line_value(doc.page_content, "Total unique services for client")
+        names = split_csv_value(line_value(doc.page_content, "Unique Services"))
+        if count:
+            answer = f"{client} main total unique services {count} hain."
+            if is_list_query and names:
+                answer += "\n\nServices:\n" + "\n".join(f"- {name}" for name in names)
+            return answer, [doc]
+
+    return None, []
+
+
+def structured_vm_answer(query: str, available_chunks: list[Document], llm):
+    rows = structured_rows_from_chunks(available_chunks)
+    if not looks_like_structured_vm_question(query, rows):
+        return None, []
+
+    context = "\n\n".join(
+        [
+            "Structured VM/service data summary:",
+            structured_table_summary(rows),
+            "Structured VM/service rows:",
+            compact_structured_table(rows),
+        ]
+    )
+
+    prompt = f"""
+You answer questions about the uploaded VM/service inventory.
+
+Use ONLY the structured data below. Do not guess.
+For questions about "VMs", "machines", or "servers", count DISTINCT VM Name values unless the user explicitly asks for rows, services, ports, or entries.
+For questions about services, use Service Name.
+If the answer is not present in the structured data, say "I don't know from the uploaded VM list."
+Give concise answers, and include relevant VM names, IPs, services, ports, project, or environment when useful.
+
+{context}
+
+Question:
+{query}
+"""
+
+    response = llm.invoke(prompt)
+    sources = [
+        doc
+        for doc in available_chunks
+        if str(doc.metadata.get("section", "")).lower().startswith("excel summary")
+        or str(doc.metadata.get("section", "")).lower().startswith("client summary:")
+    ]
+    return response.content, sources[:3]
+
+
 query = st.text_input("Ask a question:").strip()
 
 if query:
     with st.spinner("Generating answer..."):
-        docs = hybrid_search(query)
+        direct_answer, direct_sources = structured_answer(query, chunks)
+        if not direct_answer:
+            direct_answer, direct_sources = structured_vm_answer(query, chunks, llm)
 
-        if not docs:
-            st.warning("No relevant info found.")
+        if direct_answer:
+            st.write("### Answer")
+            st.write(direct_answer)
+
+            st.write("### Sources")
+            for source in sorted({source_label(doc) for doc in direct_sources}):
+                st.write(f"- {source}")
+
+            docs = []
         else:
+            docs = hybrid_search(query)
+
+        if not direct_answer and not docs:
+            st.warning("No relevant info found.")
+        elif not direct_answer:
             context = format_context(docs)
             sources = sorted({source_label(doc) for doc in docs})
 
@@ -563,4 +1067,5 @@ Question:
             st.write("### Sources")
             for source in sources:
                 st.write(f"- {source}")
+
 
