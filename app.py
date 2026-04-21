@@ -204,6 +204,19 @@ def extract_excel(uploaded_file) -> list[Document]:
     return docs
 
 
+def extract_markdown(uploaded_file) -> list[Document]:
+    text = uploaded_file.getvalue().decode("utf-8", errors="replace").strip()
+    if not text:
+        return []
+
+    return [
+        Document(
+            page_content=text,
+            metadata={"source": uploaded_file.name},
+        )
+    ]
+
+
 def extract_documents(uploaded_files) -> list[Document]:
     documents = []
 
@@ -224,6 +237,9 @@ def extract_documents(uploaded_files) -> list[Document]:
             elif extension in {".xlsx", ".xlsm"}:
                 file_docs = extract_excel(uploaded_file)
                 st.success(f"Excel uploaded: {source_name}")
+            elif extension in {".md", ".markdown"}:
+                file_docs = extract_markdown(uploaded_file)
+                st.success(f"Markdown uploaded: {source_name}")
             else:
                 st.warning(f"Unsupported file skipped: {source_name}")
                 continue
@@ -268,13 +284,13 @@ def clear_previous_namespace(index, namespace: str | None):
 
 
 uploaded_files = st.file_uploader(
-    "Upload Files (PDF, DOCX, PPTX, XLSX)",
-    type=["pdf", "docx", "pptx", "xlsx", "xlsm"],
+    "Upload Files (PDF, DOCX, PPTX, XLSX, MD)",
+    type=["pdf", "docx", "pptx", "xlsx", "xlsm", "md", "markdown"],
     accept_multiple_files=True,
 )
 
 if not uploaded_files:
-    st.info("Upload one or more PDF, DOCX, PPTX, or XLSX files to start chatting.")
+    st.info("Upload one or more PDF, DOCX, PPTX, XLSX, or MD files to start chatting.")
     st.stop()
 
 index = get_pinecone_index(PINECONE_API_KEY, INDEX_NAME)
