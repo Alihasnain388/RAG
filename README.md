@@ -2,7 +2,7 @@ Link= https://ghcec5xiz4rv5zjvappbba3.streamlit.app/
 
 # 📚 RAG Chatbot
 
-A **Retrieval-Augmented Generation (RAG) Chatbot** built with Streamlit that answers questions based on uploaded PDF and DOCX files. It uses **hybrid search (BM25 + vector embeddings + Cross-Encoder reranking)** and an LLM to generate accurate, context-aware responses.
+A **Retrieval-Augmented Generation (RAG) Chatbot** built with Streamlit that answers questions based on uploaded PDF,DOCX,MD etc files. It uses **hybrid search (BM25 + vector embeddings + Cross-Encoder reranking)** and an LLM to generate accurate, context-aware responses.
 
 ---
 
@@ -10,9 +10,10 @@ A **Retrieval-Augmented Generation (RAG) Chatbot** built with Streamlit that ans
 
 - 📂 Upload multiple files:
   - PDF
-  - DOCX  
-
-- 📄 Automatic text extraction from documents
+  - DOCX
+  - MD
+  - Excel
+  - ETC 
 
 - ✂️ Intelligent document chunking using RecursiveCharacterTextSplitter
 
