@@ -644,7 +644,7 @@ uploaded_files = st.file_uploader(
 )
 
 if not uploaded_files:
-    st.info()
+    st.info("")
     st.stop()
 
 index = get_pinecone_index(PINECONE_API_KEY, INDEX_NAME)
