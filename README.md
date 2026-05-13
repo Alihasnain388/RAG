@@ -8,7 +8,7 @@ A **Retrieval-Augmented Generation (RAG) Chatbot** built with Streamlit that ans
 
 ## 🚀 Features
 
-- 📂 Upload multiple files:
+- 📂 Upload files:
   - PDF
   - DOCX
   - MD
