@@ -12,8 +12,7 @@ A **Retrieval-Augmented Generation (RAG) Chatbot** built with Streamlit that ans
   - PDF
   - DOCX
   - MD
-  - Excel
-  - ETC 
+  - Excel 
 
 - ✂️ Intelligent document chunking using RecursiveCharacterTextSplitter
 
